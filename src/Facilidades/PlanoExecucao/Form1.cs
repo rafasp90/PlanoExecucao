@@ -7,6 +7,8 @@ using System.Linq;
 using Modelo.PlanoExecucao;
 using System.Configuration;
 using System.Threading.Tasks;
+using System.Diagnostics;
+using System.Collections.Generic;
 
 namespace PlanoExecucao
 {
@@ -42,7 +44,7 @@ namespace PlanoExecucao
         }
 
         private async void btnCriar_Click(object sender, EventArgs e)
-        {
+        {            
             DesabilitarCampos(true);
             try
             {
@@ -51,7 +53,7 @@ namespace PlanoExecucao
                     this.UseWaitCursor = true;
                     SetTextLblProgresso("Processo iniciado");
                     PlanoExecucaoResult result = await CriarPlanoExecucao();
-                    
+
                     this.UseWaitCursor = false;
                     SetTextLblProgresso("Finalizado");
                     string mensagem = $"Finalizado \n Total Processado: {result.TotalProcessado} \n Total Sucesso: {result.TotalProcessadoSucesso} \n Total Falha: {result.TotalProcessadoErro}";
@@ -144,8 +146,46 @@ namespace PlanoExecucao
             _log.AppendLine();
         }
 
+        private List<string> ObterArquivos(string diretorio)
+        {            
+            string diretorioCorrente = Path.GetFileName(diretorio);
+            
+            StringBuilder commands = new StringBuilder();
+
+            commands.Append("/C ");
+            commands.Append($@"cd {diretorio}");
+            commands.Append(" && ");
+            commands.Append("cd ..");
+            commands.Append(" && ");
+            commands.Append($@"git diff --name-only {diretorioCorrente}/ ");
+
+            Process process = new Process();
+            ProcessStartInfo startInfo = new ProcessStartInfo
+            {
+                WindowStyle = ProcessWindowStyle.Hidden,
+                FileName = "cmd.exe",
+                Arguments = commands.ToString(),
+                UseShellExecute = false,
+                RedirectStandardOutput = true
+            };
+            process.StartInfo = startInfo;
+
+            process.Start();
+
+            string output = process.StandardOutput.ReadToEnd();
+            process.WaitForExit();
+            List<string> procedures = new List<string>();
+
+            foreach(var procedure in output?.Split('\n'))
+            {
+                procedures.Add(procedure.Substring(procedure.LastIndexOf("/") + 1));
+            }
+
+            return procedures;
+        }
+
         private async Task<PlanoExecucaoResult> CriarPlanoExecucao()
-        {
+        {            
             PlanoExecucaoResult result = new PlanoExecucaoResult();
             _log.Clear();
             try
@@ -153,6 +193,12 @@ namespace PlanoExecucao
                 DirectoryInfo diretorioOrigem = new DirectoryInfo(txtDiretorioOrigem.Text);
 
                 var arquivos = diretorioOrigem.EnumerateFiles("*.sql", SearchOption.TopDirectoryOnly);
+
+                if (chkIntegrarGit.Checked)
+                {
+                    var procedures = ObterArquivos(txtDiretorioOrigem.Text);
+                    arquivos = arquivos.Where(item => procedures.Any(procedure => procedure.Equals(item.Name))).ToList();
+                }
 
                 int contador = 1;
                 int total = arquivos.Count();
@@ -170,22 +216,28 @@ namespace PlanoExecucao
                         SetTextLblProgresso(texto);
                         SetValueProgresso(contador);
 
-                        //cria diretório caso não exista
-                        if (!Directory.Exists(diretorio))
+                        bool existeDiretorio = Directory.Exists(diretorio);
+                        if (!existeDiretorio || chkIntegrarGit.Checked)
                         {
                             result.TotalProcessado += 1;
-
-                            Directory.CreateDirectory(diretorio);
-                            InserirLog("======================================================================", false);
-                            InserirLog($"Procedure: {nomeArquivo}", false);
-                            InserirLog($"Novo diretório: {diretorio}");
+                            if (!existeDiretorio)
+                            {
+                                Directory.CreateDirectory(diretorio);
+                                InserirLog("======================================================================", false);
+                                InserirLog($"Procedure: {nomeArquivo}", false);
+                                InserirLog($"Novo diretório: {diretorio}");
+                            }
+                            else
+                            {
+                                InserirLog($"Diretório existente: {diretorio}");
+                            }
 
                             string nomeArquivoCompleto;
 
                             //cria arquivo EXEC
                             nomeArquivoCompleto = Path.Combine(diretorio, $"{nomeArquivo}.EXEC.sql");
                             string arquivoExecucao = ObterConteudoArquivoExecucao(nomeArquivo);
-                            CriarArquivo(nomeArquivoCompleto, arquivoExecucao.Replace("{GO}", "GO"));
+                            GravarArquivo(nomeArquivoCompleto, arquivoExecucao.Replace("{GO}", "GO"));
                             InserirLog($"Criado arquivo EXEC: {nomeArquivoCompleto}");
 
                             InserirLog("Inicio obter statisticas");
@@ -195,17 +247,17 @@ namespace PlanoExecucao
 
                             //cria arquivo IO
                             nomeArquivoCompleto = Path.Combine(diretorio, $"{nomeArquivo}.IO.txt");
-                            CriarArquivo(nomeArquivoCompleto, estatisticaSql.EstatisticaIo);
+                            GravarArquivo(nomeArquivoCompleto, estatisticaSql.EstatisticaIo);
                             InserirLog($"Criado arquivo IO: {nomeArquivoCompleto}");
 
                             //cria arquivo SQLPLAN
                             nomeArquivoCompleto = Path.Combine(diretorio, $"{nomeArquivo}.sqlplan");
-                            CriarArquivo(nomeArquivoCompleto, estatisticaSql.EstatisticaXml);
+                            GravarArquivo(nomeArquivoCompleto, estatisticaSql.EstatisticaXml);
                             InserirLog($"Criado arquivo SQLPLAN: {nomeArquivoCompleto}");
 
                             InserirLog("======================================================================", false);
                             result.TotalProcessadoSucesso += 1;
-                        }
+                        }                        
                     }
                     catch (Exception ex)
                     {
@@ -233,12 +285,9 @@ namespace PlanoExecucao
             return await Task.Run(() => result);
         }
 
-        private void CriarArquivo(string caminho, string conteudo)
+        private void GravarArquivo(string caminho, string conteudo)
         {
-            using (StreamWriter sw = File.CreateText(caminho))
-            {
-                sw.Write(conteudo);
-            }
+            File.WriteAllText(caminho, conteudo);            
         }
 
         private string ObterConteudoArquivoExecucao(string nomeProcedure)
@@ -319,20 +368,5 @@ namespace PlanoExecucao
             Detalhe formDetalhe = new Detalhe(_log.ToString());
             formDetalhe.Show();
         }
-
-        //private void GravarLogErro(Exception ex)
-        //{
-        //    string diretorio = Path.Combine(ConfigurationManager.AppSettings["Log"], DateTime.Now.ToString("yyyy-MM-dd"));
-        //    string arquivo = Path.Combine(diretorio, $"Erro-{DateTime.Now:yyyy-MM-dd}.txt");
-        //    string conteudo = $"Ocorreu um erro: {ex}";
-
-        //    if (!Directory.Exists(diretorio))
-        //        Directory.CreateDirectory(diretorio);
-
-        //    if (File.Exists(arquivo))
-        //        using (StreamWriter sw = File.AppendText(arquivo)) { sw.WriteLine(conteudo); }
-        //    else
-        //        using (StreamWriter sw = File.CreateText(arquivo)) { sw.WriteLine(conteudo); }
-        //}
     }
 }
