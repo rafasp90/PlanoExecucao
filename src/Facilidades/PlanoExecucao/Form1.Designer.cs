@@ -43,6 +43,7 @@ namespace PlanoExecucao
             this.progresso = new System.Windows.Forms.ProgressBar();
             this.lblProgresso = new System.Windows.Forms.Label();
             this.btnResultado = new System.Windows.Forms.Button();
+            this.chkIntegrarGit = new System.Windows.Forms.CheckBox();
             this.SuspendLayout();
             // 
             // label1
@@ -147,11 +148,24 @@ namespace PlanoExecucao
             this.btnResultado.UseVisualStyleBackColor = true;
             this.btnResultado.Click += new System.EventHandler(this.btnResultado_Click);
             // 
+            // chkIntegrarGit
+            // 
+            this.chkIntegrarGit.AutoSize = true;
+            this.chkIntegrarGit.Checked = true;
+            this.chkIntegrarGit.CheckState = System.Windows.Forms.CheckState.Checked;
+            this.chkIntegrarGit.Location = new System.Drawing.Point(651, 94);
+            this.chkIntegrarGit.Name = "chkIntegrarGit";
+            this.chkIntegrarGit.Size = new System.Drawing.Size(95, 17);
+            this.chkIntegrarGit.TabIndex = 12;
+            this.chkIntegrarGit.Text = "Repositório Git";
+            this.chkIntegrarGit.UseVisualStyleBackColor = true;
+            // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(767, 191);
+            this.Controls.Add(this.chkIntegrarGit);
             this.Controls.Add(this.btnResultado);
             this.Controls.Add(this.lblProgresso);
             this.Controls.Add(this.progresso);
@@ -189,6 +203,7 @@ namespace PlanoExecucao
         private System.Windows.Forms.ProgressBar progresso;
         private System.Windows.Forms.Label lblProgresso;
         private System.Windows.Forms.Button btnResultado;
+        private System.Windows.Forms.CheckBox chkIntegrarGit;
     }
 }
 
