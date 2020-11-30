@@ -157,7 +157,7 @@ namespace PlanoExecucao
             commands.Append(" && ");
             commands.Append("cd ..");
             commands.Append(" && ");
-            commands.Append($@"git diff --name-only {diretorioCorrente}/ ");
+            commands.Append($@"git status {diretorioCorrente}/ -s");
 
             Process process = new Process();
             ProcessStartInfo startInfo = new ProcessStartInfo
