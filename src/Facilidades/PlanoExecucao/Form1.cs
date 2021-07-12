@@ -14,7 +14,7 @@ namespace PlanoExecucao
 {
     public partial class Form1 : Form
     {
-        private readonly string _conexao = "data source={0};Initial Catalog={1};Integrated Security=True;";
+        private readonly string _conexao = "data source={0};Initial Catalog={1};{2};";
         private StringBuilder _log;
 
         public Form1()
@@ -29,6 +29,7 @@ namespace PlanoExecucao
             txtBaseDados.Text = ConfigurationManager.AppSettings["BaseDados"];
             txtDiretorioOrigem.Text = ConfigurationManager.AppSettings["DiretorioOrigem"];
             txtDiretorioDestino.Text = ConfigurationManager.AppSettings["DiretorioDestino"];
+            cbAutenticacao.SelectedIndex = 0;
             SetTextLblProgresso("");
             SetValueProgresso(0);
             _log = new StringBuilder();
@@ -40,7 +41,9 @@ namespace PlanoExecucao
 
         private string ObterConexao()
         {
-            return string.Format(_conexao, txtServidor.Text.Trim(), txtBaseDados.Text.Trim());
+            string autenticacao = "Integrated Security=True";
+            if (AutenticacaoSqlServer) autenticacao = $"UID={txtUsuario.Text.Trim()};PWD={txtSenha.Text.Trim()}";
+            return string.Format(_conexao, txtServidor.Text.Trim(), txtBaseDados.Text.Trim(), autenticacao);
         }
 
         private async void btnCriar_Click(object sender, EventArgs e)
@@ -110,6 +113,15 @@ namespace PlanoExecucao
             {
                 MessageBox.Show("O campo Base de Dados é obrigatório!");
                 return false;
+            }
+
+            if (AutenticacaoSqlServer)
+            {
+                if (string.IsNullOrWhiteSpace(txtUsuario.Text) || string.IsNullOrWhiteSpace(txtSenha.Text))
+                {
+                    MessageBox.Show("Preencha o Login e Senha!");
+                    return false;
+                }
             }
 
             return true;
@@ -217,7 +229,7 @@ namespace PlanoExecucao
                         SetValueProgresso(contador);
 
                         bool existeDiretorio = Directory.Exists(diretorio);
-                        if (!existeDiretorio || chkIntegrarGit.Checked)
+                        if (!existeDiretorio || chkIntegrarGit.Checked || !File.Exists(Path.Combine(diretorio, $"{nomeArquivo}.sqlplan")))
                         {
                             result.TotalProcessado += 1;
                             if (!existeDiretorio)
@@ -232,17 +244,23 @@ namespace PlanoExecucao
                                 InserirLog($"Diretório existente: {diretorio}");
                             }
 
-                            string nomeArquivoCompleto;
+                            string nomeArquivoCompleto = Path.Combine(diretorio, $"{nomeArquivo}.EXEC.sql");
+                            string arquivoExecucao = string.Empty;
 
-                            //cria arquivo EXEC
-                            nomeArquivoCompleto = Path.Combine(diretorio, $"{nomeArquivo}.EXEC.sql");
-                            string arquivoExecucao = ObterConteudoArquivoExecucao(nomeArquivo);
-                            GravarArquivo(nomeArquivoCompleto, arquivoExecucao.Replace("{GO}", "GO"));
-                            InserirLog($"Criado arquivo EXEC: {nomeArquivoCompleto}");
-
+                            if (File.Exists(nomeArquivoCompleto))
+                            {
+                                arquivoExecucao = File.ReadAllText(nomeArquivoCompleto);
+                                InserirLog($"Obtido arquivo EXEC existente: {nomeArquivoCompleto}");
+                            } else
+                            {
+                                arquivoExecucao = ObterConteudoArquivoExecucao(nomeArquivo);
+                                GravarArquivo(nomeArquivoCompleto, arquivoExecucao);
+                                InserirLog($"Criado arquivo EXEC: {nomeArquivoCompleto}");
+                            }
+                            
                             InserirLog("Inicio obter statisticas");
                             //obter estatisticas
-                            EstatisticaSql estatisticaSql = new Estatistica(ObterConexao()).ObterEstatistaSql(arquivoExecucao.Replace("{GO}", ""));
+                            EstatisticaSql estatisticaSql = new Estatistica(ObterConexao()).ObterEstatistaSql(TratarExecSql(arquivoExecucao));
                             InserirLog("Fim obter statisticas");
 
                             //cria arquivo IO
@@ -264,12 +282,12 @@ namespace PlanoExecucao
                         result.TotalProcessadoErro += 1;
                         InserirLog($"Ocorreu um erro: {ex}");
 
-                        if (!string.IsNullOrWhiteSpace(diretorio))
-                        {
-                            InserirLog($"Exclusão do diretório [{diretorio}]");
-                            Directory.Delete(diretorio, true);
-                            InserirLog($"Diretório [{diretorio}] excluido com sucesso ");
-                        }
+                        //if (!string.IsNullOrWhiteSpace(diretorio))
+                        //{
+                        //    InserirLog($"Exclusão do diretório [{diretorio}]");
+                        //    Directory.Delete(diretorio, true);
+                        //    InserirLog($"Diretório [{diretorio}] excluido com sucesso ");
+                        //}
                         InserirLog("======================================================================", false);
                     }
                     
@@ -283,6 +301,21 @@ namespace PlanoExecucao
                 InserirLog($"Detalhe: {e}");
             }
             return await Task.Run(() => result);
+        }
+
+        private string TratarExecSql(string arquivoExec)
+        {
+            StringBuilder result = new StringBuilder();
+
+            foreach(string linha in arquivoExec.Split(new[] { Environment.NewLine }, StringSplitOptions.None))
+            {
+                if (!linha.Trim().Equals("GO"))
+                {
+                    result.AppendLine(linha);
+                }
+            }
+
+            return result.ToString();
         }
 
         private void GravarArquivo(string caminho, string conteudo)
@@ -300,7 +333,7 @@ namespace PlanoExecucao
                 throw new Exception($"Procedure {nomeProcedure} não encontrada.");
 
             conteudo.AppendLine($"USE {txtBaseDados.Text.Trim()}");
-            conteudo.AppendLine("{GO}");
+            conteudo.AppendLine("GO");
             conteudo.AppendLine("BEGIN TRAN");
             conteudo.AppendLine("");
             conteudo.AppendLine("   SET STATISTICS IO ON;");
@@ -318,7 +351,7 @@ namespace PlanoExecucao
             conteudo.AppendLine("   SET STATISTICS IO OFF;");
             conteudo.AppendLine("");
             conteudo.AppendLine("ROLLBACK TRAN");
-            conteudo.AppendLine("{GO}");
+            conteudo.AppendLine("GO");
 
             return conteudo.ToString();
         }
@@ -367,6 +400,20 @@ namespace PlanoExecucao
         {
             Detalhe formDetalhe = new Detalhe(_log.ToString());
             formDetalhe.Show();
+        }
+
+        private bool AutenticacaoSqlServer => cbAutenticacao.SelectedItem.ToString().Equals("SQL Server");
+
+        private void cbAutenticacao_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            habilitarUsuarioSenha(AutenticacaoSqlServer);
+        }
+
+        private void habilitarUsuarioSenha(bool habilitar)
+        {
+            txtUsuario.Enabled = habilitar;
+            txtSenha.Enabled = habilitar;
+            if (habilitar) txtUsuario.Focus();
         }
     }
 }
